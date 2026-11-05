@@ -1,0 +1,346 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model NicheSchedule {
+  id                   String         @id @default(cuid())
+  scheduleKey          String         @unique
+  niche                String
+  executionDate        DateTime
+  targetCountry        String
+  targetAudience       String
+  language             String
+  researchIdeasCount   Int
+  pinsToGenerate       Int
+  destinationUrl       String
+  status               String         @default("Pending")
+  workbookRelativePath String?
+  sourceRow            Int?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+  executions           ExecutionJob[]
+
+  @@index([executionDate, status])
+  @@index([niche])
+}
+
+model WorkbookUpload {
+  id                    String   @id @default(cuid())
+  relativePath          String   @unique
+  sha256                String
+  sizeBytes             BigInt
+  importedScheduleCount Int
+  createdAt             DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+model ExecutionJob {
+  id               String            @id @default(cuid())
+  scheduleId       String
+  idempotencyKey   String            @unique
+  status           String            @default("Queued")
+  stage            String            @default("Queued")
+  progress         Int               @default(0)
+  attemptCount     Int               @default(0)
+  availableAt      DateTime          @default(now())
+  leaseOwner       String?
+  leaseExpiresAt   DateTime?
+  startedAt        DateTime?
+  finishedAt       DateTime?
+  errorCategory    String?
+  errorMessage     String?
+  checkpointJson   String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  schedule         NicheSchedule     @relation(fields: [scheduleId], references: [id], onDelete: Restrict)
+  researchSessions ResearchSession[]
+  ideas            ContentIdea[]
+  selectedIdeas    SelectedIdea[]
+  assets           GeneratedAsset[]
+  logs             ExecutionLog[]
+  storageRecords   StorageRecord[]
+
+  @@index([status, availableAt])
+  @@index([leaseExpiresAt])
+  @@index([scheduleId])
+}
+
+model ResearchSession {
+  id          String           @id @default(cuid())
+  executionId String
+  status      String           @default("Pending")
+  reportJson  String?
+  reportPath  String?
+  startedAt   DateTime?
+  finishedAt  DateTime?
+  createdAt   DateTime         @default(now())
+  execution   ExecutionJob     @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  sources     ResearchSource[]
+  ideas       ContentIdea[]
+
+  @@index([executionId, status])
+}
+
+model ResearchSource {
+  id                String          @id @default(cuid())
+  researchSessionId String
+  canonicalUrl      String
+  title             String
+  sourceUrl         String
+  publishedAt       String?
+  retrievedAt       DateTime        @default(now())
+  excerpt           String
+  relevance         String?
+  researchSession   ResearchSession @relation(fields: [researchSessionId], references: [id], onDelete: Cascade)
+
+  @@unique([researchSessionId, canonicalUrl])
+  @@index([researchSessionId])
+}
+
+model ContentIdea {
+  id                   String           @id @default(cuid())
+  executionId          String
+  researchSessionId    String?
+  ideaKey              String
+  title                String
+  coreConcept          String
+  explanation          String
+  audienceSegment      String
+  audienceNeed         String
+  searchIntent         String
+  keywordsJson         String
+  rationale            String
+  sourceReferencesJson String
+  visualDirection      String
+  contentFormat        String
+  trendClassification  String
+  destinationRelevance String
+  validationStatus     String           @default("Valid")
+  createdAt            DateTime         @default(now())
+  execution            ExecutionJob     @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  researchSession      ResearchSession? @relation(fields: [researchSessionId], references: [id], onDelete: SetNull)
+  score                IdeaScore?
+  selection            SelectedIdea?
+  contentPackage       ContentPackage?
+
+  @@unique([executionId, ideaKey])
+  @@index([executionId, createdAt])
+}
+
+model IdeaScore {
+  id                         String      @id @default(cuid())
+  ideaId                     String      @unique
+  trendRelevance             Int
+  audienceResonance          Int
+  searchPotential            Int
+  clickPotential             Int
+  visualAppeal               Int
+  originality                Int
+  evergreenValue             Int
+  finalScore                 Float
+  reasoningJson              String
+  strengthsJson              String
+  weaknessesJson             String
+  improvementSuggestionsJson String
+  createdAt                  DateTime    @default(now())
+  idea                       ContentIdea @relation(fields: [ideaId], references: [id], onDelete: Cascade)
+}
+
+model SelectedIdea {
+  id          String       @id @default(cuid())
+  executionId String
+  ideaId      String       @unique
+  rank        Int
+  selected    Boolean      @default(true)
+  reason      String?
+  createdAt   DateTime     @default(now())
+  execution   ExecutionJob @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  idea        ContentIdea  @relation(fields: [ideaId], references: [id], onDelete: Cascade)
+
+  @@unique([executionId, rank])
+  @@index([executionId, selected])
+}
+
+model ContentPackage {
+  id               String           @id @default(cuid())
+  contentId        String           @unique
+  ideaId           String           @unique
+  pinterestTitle   String
+  description      String
+  hashtagsJson     String
+  keywordsJson     String
+  imagePrompt      String
+  destinationUrl   String
+  generationStatus String           @default("Pending")
+  generatedAt      DateTime         @default(now())
+  idea             ContentIdea      @relation(fields: [ideaId], references: [id], onDelete: Cascade)
+  assets           GeneratedAsset[]
+  pinterestJobs    PinterestPublishingJob[]
+}
+
+model GeneratedAsset {
+  id               String          @id @default(cuid())
+  executionId      String
+  contentPackageId String?
+  relativePath     String          @unique
+  mimeType         String?
+  format           String?
+  width            Int?
+  height           Int?
+  sizeBytes        BigInt?
+  sha256           String?
+  status           String          @default("Pending")
+  validationJson   String?
+  createdAt        DateTime        @default(now())
+  execution        ExecutionJob    @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  contentPackage   ContentPackage? @relation(fields: [contentPackageId], references: [id], onDelete: SetNull)
+
+  @@index([executionId, status])
+}
+
+model AIConfiguration {
+  id               String   @id @default(cuid())
+  stage            String   @unique
+  providerName     String
+  baseUrl          String
+  accountId        String?
+  apiKeyEncrypted  String
+  modelName        String
+  temperature      Float    @default(0.7)
+  maxOutputTokens  Int      @default(4096)
+  requestTimeoutMs Int      @default(60000)
+  retryLimit       Int      @default(3)
+  enabled          Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model ExecutionLog {
+  id           String       @id @default(cuid())
+  executionId  String
+  stage        String
+  level        String       @default("info")
+  event        String
+  message      String
+  metadataJson String?
+  retryCount   Int          @default(0)
+  createdAt    DateTime     @default(now())
+  execution    ExecutionJob @relation(fields: [executionId], references: [id], onDelete: Cascade)
+
+  @@index([executionId, createdAt])
+  @@index([stage, level])
+}
+
+model StorageRecord {
+  id            String       @id @default(cuid())
+  executionId   String
+  relativePath  String       @unique
+  category      String
+  sizeBytes     BigInt       @default(0)
+  sha256        String?
+  deletionState String       @default("Active")
+  createdAt     DateTime     @default(now())
+  deletedAt     DateTime?
+  execution     ExecutionJob @relation(fields: [executionId], references: [id], onDelete: Cascade)
+
+  @@index([executionId, category])
+  @@index([deletionState])
+}
+
+// ─── Pinterest Publishing Engine ───────────────────────────────────────────
+
+model PinterestAccount {
+  id                     String                   @id @default(cuid())
+  pinterestUserId        String                   @unique
+  username               String
+  displayName            String
+  profileImage           String?
+  accessTokenEncrypted   String
+  refreshTokenEncrypted  String?
+  tokenExpiresAt         DateTime?
+  status                 String                   @default("Connected")
+  lastAuthenticatedAt    DateTime?
+  lastSyncedAt           DateTime?
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime                 @updatedAt
+  boards                 PinterestBoard[]
+  publishingJobs         PinterestPublishingJob[]
+
+  @@index([status])
+}
+
+model PinterestBoard {
+  id               String                   @id @default(cuid())
+  pinterestBoardId String
+  accountId        String
+  name             String
+  description      String?
+  privacy          String?
+  isDefault        Boolean                  @default(false)
+  status           String                   @default("Active")
+  lastSyncedAt     DateTime?
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+  account          PinterestAccount         @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  publishingJobs   PinterestPublishingJob[]
+
+  @@unique([accountId, pinterestBoardId])
+  @@index([accountId, status])
+}
+
+model PinterestPublishingJob {
+  id               String           @id @default(cuid())
+  contentPackageId String
+  accountId        String
+  boardId          String
+  scheduledAt      DateTime
+  approvalStatus   String           @default("AwaitingApproval")
+  status           String           @default("Draft")
+  retryCount       Int              @default(0)
+  lastError        String?
+  pinterestPinId   String?
+  pinterestPinUrl  String?
+  leaseOwner       String?
+  leaseExpiresAt   DateTime?
+  availableAt      DateTime         @default(now())
+  startedAt        DateTime?
+  finishedAt       DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  account          PinterestAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  board            PinterestBoard   @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  contentPackage   ContentPackage   @relation(fields: [contentPackageId], references: [id], onDelete: Cascade)
+
+  @@index([status, availableAt])
+  @@index([approvalStatus, status])
+  @@index([accountId, status])
+  @@index([contentPackageId])
+  @@index([leaseExpiresAt])
+}
+
+model PinterestOAuthState {
+  id        String   @id @default(cuid())
+  state     String   @unique
+  codeVerifier String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
+}
+
+model PinterestEngineSettings {
+  id                String   @id @default(cuid())
+  engineEnabled     Boolean  @default(false)
+  engineStatus      String   @default("Stopped")
+  timezone          String   @default("Asia/Kolkata")
+  workerConcurrency Int      @default(3)
+  retryLimit        Int      @default(3)
+  retryBackoffMs    Int      @default(60000)
+  updatedAt         DateTime @updatedAt
+}
